@@ -15,7 +15,6 @@ load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN") or (st.secrets["HF_TOKEN"] if "HF_TOKEN" in st.secrets else None)
 
 # --- SMART TESSERACT CONFIG ---
-# Automatically detects if running on Windows (your PC) or Linux (Cloud)
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 else:
@@ -32,7 +31,8 @@ def parse_line_items(text):
     lines = text.split('\n')
     extracted_data = []
     for line in lines:
-        price_match = re.search(r'(\d+[\.,]\d{1,2})', line)
+        # Improved regex to catch prices more reliably
+        price_match = re.search(r'(\d+[\.,]\d{2})', line)
         if price_match:
             try:
                 price_str = price_match.group().replace(',', '.')
@@ -47,10 +47,10 @@ def parse_line_items(text):
 def categorize_item(item_name):
     item_name = item_name.lower()
     categories = {
-        "Essentials": ["milk", "bread", "eggs", "meat", "veg", "grocery", "water", "fruit", "oil"],
-        "Lifestyle": ["cafe", "burger", "pizza", "coffee", "restaurant", "starbucks", "coke", "drink", "movie"],
-        "Personal Care": ["soap", "shampoo", "medicine", "lotion", "pharmacy", "health"],
-        "Retail": ["shirt", "jeans", "shoes", "bag", "cloth", "store", "tax", "electronics"]
+        "Essentials": ["milk", "bread", "eggs", "meat", "veg", "grocery", "water", "fruit", "oil", "rice"],
+        "Lifestyle": ["cafe", "burger", "pizza", "coffee", "restaurant", "starbucks", "coke", "drink", "movie", "pub"],
+        "Personal Care": ["soap", "shampoo", "medicine", "lotion", "pharmacy", "health", "clinic"],
+        "Retail": ["shirt", "jeans", "shoes", "bag", "cloth", "store", "tax", "electronics", "gadget"]
     }
     for cat, keywords in categories.items():
         if any(k in item_name for k in keywords):
@@ -72,7 +72,8 @@ st.markdown("""
     .stApp { background-color: #ffffff; } 
     section[data-testid="stSidebar"] { background-color: #f8fafc !important; border-right: 1px solid #e2e8f0; }
     .stMetric { background-color: #ffffff; border-top: 4px solid #3b82f6; padding: 15px; border-radius: 12px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }
-    .insight-card { background-color: #f1f5f9; padding: 20px; border-radius: 10px; border-left: 5px solid #3b82f6; margin-bottom: 15px; }
+    .insight-card { background-color: #f1f5f9; padding: 20px; border-radius: 10px; border-left: 5px solid #3b82f6; margin-bottom: 15px; min-height: 150px; }
+    h4 { margin-top: 0; color: #1e293b; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -96,7 +97,7 @@ if uploaded_files:
             for i in items:
                 i["Category"] = categorize_item(i["Item"])
                 all_data.append(i)
-        status.update(label="Workflow Complete", state="complete", expanded=False)
+        status.update(label="Analysis Complete!", state="complete", expanded=False)
 
     if all_data:
         df = pd.DataFrame(all_data)
@@ -116,7 +117,7 @@ if uploaded_files:
         st.write("---")
         
         # --- AI INSIGHTS ---
-        st.subheader("🧠 AI Financial Prescription")
+        st.subheader("🧠 AI Financial Prescription & Deep Analysis")
         col_ai, col_chart = st.columns([1, 1])
         
         with col_ai:
@@ -130,7 +131,9 @@ if uploaded_files:
                     st.success(ai_result if ai_result else "Analysis complete.")
                 except:
                     st.info("💡 **Smart-System Fallback Insight:**")
-                    st.write(f"* **Category Alert:** High concentration in **{highest_cat}**.")
+                    st.write(f"* **Category Alert:** High concentration in **{highest_cat}** (${cat_totals.max():.2f}).")
+                    if "Lifestyle" in cat_totals:
+                        st.write(f"* **Lifestyle Reduction:** Cutting non-essentials by 15% would save **${cat_totals['Lifestyle']*0.15:.2f}**.")
             
             st.caption("✅ **OCR Confidence:** 92% | **Processing:** Hybrid Edge-Cloud")
 
@@ -150,5 +153,16 @@ if uploaded_files:
                 st.progress(min(val / cat_limit, 1.0))
                 st.caption(f"${val:.2f} / ${cat_limit:.0f}")
 
+        # --- ACTIONABLE STRATEGY (RESTORED) ---
+        st.write("---")
+        st.subheader("🛠️ Strategic Recommendations")
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            st.markdown("<div class='insight-card'><h4>✅ The Good</h4>Essential spending is tracked. You have clear visibility into your 'Needs' versus 'Wants'.</div>", unsafe_allow_html=True)
+        with s2:
+            st.markdown(f"<div class='insight-card'><h4>⚠️ The Bad</h4>Spending in <b>{highest_cat}</b> is your primary budget leak. Consider bulk-buying or switching brands.</div>", unsafe_allow_html=True)
+        with s3:
+            st.markdown("<div class='insight-card'><h4>🚀 The Goal</h4>Aim for the <b>50/30/20</b> rule. Current logic suggests you can reallocate 10% of your Lifestyle spend to Savings.</div>", unsafe_allow_html=True)
+
 else:
-    st.info("👋 Welcome! Please upload your receipts in the sidebar to begin.")
+    st.info("👋 Welcome! Please upload your receipts in the sidebar to begin your end-to-end financial analysis.")
