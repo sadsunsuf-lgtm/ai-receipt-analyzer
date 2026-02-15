@@ -2,3 +2,7 @@
 __pycache__/
 venv/
 .streamlit/secrets.toml
+
+*.jpg
+*.png
+*.jpeg
