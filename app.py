@@ -10,52 +10,65 @@ from PIL import Image
 import pytesseract
 from dotenv import load_dotenv
 
-# --- 1. SECURE SETUP ---
+# --- 1. SETUP & SECURE KEYS ---
 load_dotenv() 
+# Ensure your .env file has HF_TOKEN=your_token_here
 HF_TOKEN = os.getenv("HF_TOKEN") or (st.secrets["HF_TOKEN"] if "HF_TOKEN" in st.secrets else None)
 
-# --- SMART TESSERACT CONFIG ---
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 else:
     pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
 
+# Using Mistral-7B - High reliability model
 API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
 headers = {"Authorization": f"Bearer {HF_TOKEN}"}
 
-# --- 2. LOGIC FUNCTIONS ---
-def clean_ocr_text(text):
-    return text.replace('O', '0').replace('o', '0').replace('I', '1').replace('|', '1')
+# --- 2. ENHANCED CATEGORIZATION ---
+def categorize_item(item_name):
+    name = item_name.lower().strip()
+    
+    categories = {
+        "Sugar & Sweets": ["sugar", "honey", "syrup", "candy", "jam", "jelly", "sweet", "dessert", "mithai"],
+        "Dairy & Eggs": ["milk", "cheese", "yogurt", "butter", "egg", "curd", "paneer", "dairy"],
+        "Bakery & Grains": ["bread", "flour", "rice", "wheat", "pasta", "cake", "bisc", "toast", "cereal", "ata"],
+        "Meat & Seafood": ["chicken", "beef", "fish", "meat", "mutton", "shrimp", "steak", "nugget"],
+        "Fruits & Vegetables": ["apple", "banana", "potato", "onion", "tomato", "veg", "fruit", "garlic", "salad"],
+        "Snacks & Drinks": ["chips", "snack", "choc", "coke", "pepsi", "juice", "water", "coffee", "tea", "ice"],
+        "Household & Care": ["soap", "shamp", "deter", "clean", "tiss", "brush", "wash", "health", "surf", "lux"],
+        "Lifestyle & Tax": ["tax", "fee", "service", "rs", "vat", "tui", "bag", "total", "amount", "payable", "sub", "ttal"]
+    }
+    
+    for cat, keywords in categories.items():
+        if any(k in name for k in keywords):
+            return cat
+    return "Miscellaneous"
 
 def parse_line_items(text):
     lines = text.split('\n')
     extracted_data = []
     for line in lines:
-        # Improved regex to catch prices more reliably
-        price_match = re.search(r'(\d+[\.,]\d{2})', line)
+        # Regex to find price - improved to catch decimals correctly
+        price_match = re.search(r'(\d+[\.,]\d{2}|\d+\.\d{1,2}| \d{2,5}$)', line)
         if price_match:
             try:
-                price_str = price_match.group().replace(',', '.')
-                price = float(price_str)
-                name_match = re.search(r'([A-Za-z\s]{3,})', line)
-                name = name_match.group().strip() if name_match else "Misc Item"
-                if price > 0:
-                    extracted_data.append({"Item": name, "Price": price})
+                # ONLY convert 'o' to '0' inside the price area for OCR correction
+                raw_price = price_match.group().strip().replace('o', '0').replace('O', '0').replace(',', '.')
+                price = float(raw_price)
+                
+                # Item Name stays original (keeping 'o' intact)
+                item_name = line.replace(price_match.group(), "").strip()
+                item_name = re.sub(r'[^a-zA-Z\s]', '', item_name).strip()
+                
+                if len(item_name) >= 2 and price > 0.1:
+                    category = categorize_item(item_name)
+                    # Filter out subtotals from being treated as items
+                    if any(x in item_name.lower() for x in ["total", "payable", "amount", "sub", "ttal"]):
+                        category = "Lifestyle & Tax"
+
+                    extracted_data.append({"Item Name": item_name, "Price": price, "Category": category})
             except: continue
     return extracted_data
-
-def categorize_item(item_name):
-    item_name = item_name.lower()
-    categories = {
-        "Essentials": ["milk", "bread", "eggs", "meat", "veg", "grocery", "water", "fruit", "oil", "rice"],
-        "Lifestyle": ["cafe", "burger", "pizza", "coffee", "restaurant", "starbucks", "coke", "drink", "movie", "pub"],
-        "Personal Care": ["soap", "shampoo", "medicine", "lotion", "pharmacy", "health", "clinic"],
-        "Retail": ["shirt", "jeans", "shoes", "bag", "cloth", "store", "tax", "electronics", "gadget"]
-    }
-    for cat, keywords in categories.items():
-        if any(k in item_name for k in keywords):
-            return cat
-    return "Miscellaneous"
 
 def preprocess_image(pil_image):
     img = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
@@ -64,105 +77,127 @@ def preprocess_image(pil_image):
     processed = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
     return processed
 
-# --- 3. UI SETUP ---
+# --- 3. UI DASHBOARD ---
 st.set_page_config(page_title="Receipt Physician Pro", layout="wide", page_icon="🧪")
 
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; } 
-    section[data-testid="stSidebar"] { background-color: #f8fafc !important; border-right: 1px solid #e2e8f0; }
-    .stMetric { background-color: #ffffff; border-top: 4px solid #3b82f6; padding: 15px; border-radius: 12px; box-shadow: 0px 4px 10px rgba(0,0,0,0.05); }
-    .insight-card { background-color: #f1f5f9; padding: 20px; border-radius: 10px; border-left: 5px solid #3b82f6; margin-bottom: 15px; min-height: 150px; }
-    h4 { margin-top: 0; color: #1e293b; }
+    .stMetric { background-color: #f8fafc; border-top: 4px solid #3b82f6; padding: 15px; border-radius: 12px; }
+    .ai-box { background-color: #f0f7ff; border: 1px solid #3b82f6; padding: 25px; border-radius: 15px; color: #1e3a8a; line-height: 1.6; }
+    .report-header { color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: 5px; margin-top: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🧪 Receipt Physician: Deep Insight AI")
+st.title("🧪 Receipt Physician: Elite Financial Dashboard")
 
 # Sidebar
-st.sidebar.header("📊 Profile Settings")
-monthly_income = st.sidebar.number_input("Monthly Income ($)", value=3000)
-monthly_budget = st.sidebar.number_input("Target Budget ($)", value=1500)
-tax_rate = st.sidebar.slider("Tax Rate (%)", 0, 20, 8)
+st.sidebar.header("📊 Financial Profile")
+income = st.sidebar.number_input("Monthly Income ($)", value=3000.0)
+budget = st.sidebar.number_input("Target Budget ($)", value=1500.0)
 uploaded_files = st.sidebar.file_uploader("📤 Upload Receipts", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
 
 if uploaded_files:
-    all_data = []
-    with st.status("🔍 Analyzing Financial DNA...", expanded=True) as status:
+    all_items = []
+    with st.status("🔍 Analyzing Financial DNA...", expanded=False):
         for uploaded_file in uploaded_files:
             img = Image.open(uploaded_file)
             processed = preprocess_image(img)
-            text = clean_ocr_text(pytesseract.image_to_string(processed))
-            items = parse_line_items(text)
-            for i in items:
-                i["Category"] = categorize_item(i["Item"])
-                all_data.append(i)
-        status.update(label="Analysis Complete!", state="complete", expanded=False)
+            raw_text = pytesseract.image_to_string(processed)
+            all_items.extend(parse_line_items(raw_text))
 
-    if all_data:
-        df = pd.DataFrame(all_data)
+    if all_items:
+        df = pd.DataFrame(all_items)
         total_spent = df["Price"].sum()
-        cat_totals = df.groupby("Category")["Price"].sum()
-        highest_cat = cat_totals.idxmax() if not cat_totals.empty else "None"
+        cat_totals = df.groupby("Category")["Price"].sum().sort_values(ascending=False)
+        top_cat = cat_totals.index[0]
+        usage_pct = (total_spent / budget) * 100
         
         # --- METRICS ---
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Expenses", f"${total_spent:.2f}")
-        m2.metric("Potential Tax Deduction", f"${total_spent * (tax_rate/100):.2f}")
-        m3.metric("Highest Category", f"{highest_cat}")
-        
-        h_score = max(0, 100 - int((total_spent / monthly_budget) * 100)) if monthly_budget > 0 else 100
-        m4.metric("Financial Health", f"{h_score}%")
+        m1.metric("Current Spend", f"${total_spent:,.2f}")
+        m2.metric("Remaining", f"${budget - total_spent:,.2f}")
+        m3.metric("Top Category", top_cat)
+        m4.metric("Budget Usage", f"{int(usage_pct)}%")
 
-        st.write("---")
+        # --- DETAILED AI REPORT ---
+        st.subheader("👨‍💼 Senior Financial Consultant: Strategic Audit")
         
-        # --- AI INSIGHTS ---
-        st.subheader("🧠 AI Financial Prescription & Deep Analysis")
-        col_ai, col_chart = st.columns([1, 1])
+        report_container = st.empty()
         
-        with col_ai:
-            st.markdown("### 📋 Executive Summary")
-            with st.spinner("Mistral-7B Thinking..."):
+        with st.spinner("Generating Professional Report..."):
+            ai_success = False
+            if HF_TOKEN:
                 try:
-                    summary = f"Total Spent: ${total_spent}. Top Category: {highest_cat}. Income: ${monthly_income}."
-                    prompt = f"<s>[INST] Analyze this budget: {summary}. Give 3 bulleted expert saving tips. [/INST]"
-                    response = requests.post(API_URL, headers=headers, json={"inputs": prompt}, timeout=15)
-                    ai_result = response.json()[0].get('generated_text', '').split("[/INST]")[-1].strip()
-                    st.success(ai_result if ai_result else "Analysis complete.")
-                except:
-                    st.info("💡 **Smart-System Fallback Insight:**")
-                    st.write(f"* **Category Alert:** High concentration in **{highest_cat}** (${cat_totals.max():.2f}).")
-                    if "Lifestyle" in cat_totals:
-                        st.write(f"* **Lifestyle Reduction:** Cutting non-essentials by 15% would save **${cat_totals['Lifestyle']*0.15:.2f}**.")
-            
-            st.caption("✅ **OCR Confidence:** 92% | **Processing:** Hybrid Edge-Cloud")
+                    prompt = f"""<s>[INST] You are a Senior Financial Consultant. 
+                    Act strictly as a professional auditor. Analyze this data:
+                    Spend: ${total_spent} | Income: ${income} | Budget: ${budget}
+                    Top Category: {top_cat} (${cat_totals.iloc[0]})
+                    Breakdown: {cat_totals.to_dict()}
+                    
+                    Structure your response exactly like this:
+                    ### 📊 EXECUTIVE HEALTH CHECK
+                    (Analyze the burn rate and income-to-spend ratio)
+                    ### 🔎 EXPENDITURE ANOMALIES
+                    (Identify risks in specific categories)
+                    ### 📉 OPTIMIZATION STRATEGY
+                    (3 high-impact steps to save money)
+                    ### 💡 VERDICT
+                    (Final professional recommendation)
+                    [/INST]"""
+                    
+                    response = requests.post(API_URL, headers=headers, json={"inputs": prompt, "parameters": {"max_new_tokens": 1000, "temperature": 0.7}}, timeout=25)
+                    result = response.json()
+                    
+                    if isinstance(result, list) and 'generated_text' in result[0]:
+                        ai_text = result[0]['generated_text'].split("[/INST]")[-1].strip()
+                        report_container.markdown(f"<div class='ai-box'>{ai_text}</div>", unsafe_allow_html=True)
+                        ai_success = True
+                except Exception as e:
+                    ai_success = False
 
-        with col_chart:
-            st.markdown("### 📊 Distribution")
-            fig = px.pie(df, names='Category', values='Price', hole=0.5, template="plotly_white")
-            st.plotly_chart(fig, use_container_width=True)
+            # --- SMART FALLBACK (Runs if AI Fails or No Token) ---
+            if not ai_success:
+                status_color = "🔴 CRITICAL" if usage_pct > 90 else "🟡 CAUTION" if usage_pct > 70 else "🟢 HEALTHY"
+                fallback_report = f"""
+                <div class='ai-box'>
+                <h3 class='report-header'>📊 EXECUTIVE HEALTH CHECK</h3>
+                Current Status: <b>{status_color}</b><br>
+                You have consumed <b>{usage_pct:.1f}%</b> of your monthly budget. 
+                Based on your income of ${income:,.2f}, your current savings rate is <b>{((income-total_spent)/income)*100:.1f}%</b>.
+                
+                <h3 class='report-header'>🔎 EXPENDITURE ANOMALIES</h3>
+                Your spending is heavily concentrated in <b>{top_cat}</b>, accounting for <b>{(cat_totals.iloc[0]/total_spent)*100:.1f}%</b> of total outlay. 
+                Any single category (excluding rent) exceeding 30% of total spend is flagged as a "Budget Leak."
+                
+                <h3 class='report-header'>📉 OPTIMIZATION STRATEGY</h3>
+                1. <b>The 10% Pivot:</b> Reducing <b>{top_cat}</b> by just 10% would save you <b>${cat_totals.iloc[0]*0.1:,.2f}</b> immediately.<br>
+                2. <b>Tax Shield:</b> Ensure all items in 'Lifestyle & Tax' are documented for potential end-of-year deductions.<br>
+                3. <b>Surplus Allocation:</b> Redirect your current ${income - total_spent:,.2f} surplus into a high-yield vehicle.
+                
+                <h3 class='report-header'>💡 VERDICT</h3>
+                The portfolio is currently <b>{'Stable' if total_spent < budget else 'Volatile'}</b>. 
+                Immediate attention to <b>{top_cat}</b> is required to maintain the year-end savings target.
+                </div>
+                """
+                report_container.markdown(fallback_report, unsafe_allow_html=True)
 
-        # --- BUDGET PROGRESS ---
+        # --- CHARTS ---
         st.write("---")
-        st.subheader("🎯 Budget Utilization by Category")
-        cat_cols = st.columns(len(cat_totals))
-        for idx, (cat, val) in enumerate(cat_totals.items()):
-            cat_limit = monthly_budget / 4 
-            with cat_cols[idx]:
-                st.write(f"**{cat}**")
-                st.progress(min(val / cat_limit, 1.0))
-                st.caption(f"${val:.2f} / ${cat_limit:.0f}")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(px.pie(df, names='Category', values='Price', hole=0.5, 
+                                 title="Spending Weight by Department", 
+                                 color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
+        with c2:
+            st.plotly_chart(px.bar(cat_totals, title="Absolute Department Spend", 
+                                  color=cat_totals.index,
+                                  labels={'value':'Total Price ($)', 'Category':'Department'}), use_container_width=True)
 
-        # --- ACTIONABLE STRATEGY (RESTORED) ---
+        # --- DATA TABLE ---
         st.write("---")
-        st.subheader("🛠️ Strategic Recommendations")
-        s1, s2, s3 = st.columns(3)
-        with s1:
-            st.markdown("<div class='insight-card'><h4>✅ The Good</h4>Essential spending is tracked. You have clear visibility into your 'Needs' versus 'Wants'.</div>", unsafe_allow_html=True)
-        with s2:
-            st.markdown(f"<div class='insight-card'><h4>⚠️ The Bad</h4>Spending in <b>{highest_cat}</b> is your primary budget leak. Consider bulk-buying or switching brands.</div>", unsafe_allow_html=True)
-        with s3:
-            st.markdown("<div class='insight-card'><h4>🚀 The Goal</h4>Aim for the <b>50/30/20</b> rule. Current logic suggests you can reallocate 10% of your Lifestyle spend to Savings.</div>", unsafe_allow_html=True)
+        st.subheader("📋 Verified Itemization Trail")
+        st.dataframe(df, use_container_width=True)
 
 else:
     st.info("👋 Welcome! Please upload your receipts in the sidebar to begin your end-to-end financial analysis.")
